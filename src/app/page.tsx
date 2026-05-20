@@ -1,66 +1,126 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client';
+
+import { useState, useRef } from 'react';
 
 export default function Home() {
+  const [input, setInput] = useState('');
+  const [response, setResponse] = useState('');
+  const [loading, setLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  async function handleSubmit(event: React.SubmitEvent) {
+    event.preventDefault();
+    if (!input.trim() || loading) {
+      return;
+    }
+
+    // Cancel any in-flight request
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    setResponse('');
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: input }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      if (!res.body) {
+        throw new Error('No response body');
+      }
+
+      // Read the stream chunk by chunk
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        // Append each decoded chunk to the response as it arrives
+        setResponse((prev) => prev + decoder.decode(value, { stream: true }));
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        setResponse(`Error: ${err.message}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main
+      style={{
+        maxWidth: 680,
+        margin: '60px auto',
+        padding: '0 20px',
+        fontFamily: 'system-ui',
+      }}
+    >
+      <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>
+        01 — Streaming
+      </h1>
+
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: 'flex', gap: 8, marginBottom: 24 }}
+      >
+        <input
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="Ask something..."
+          disabled={loading}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            fontSize: 15,
+            border: '1px solid #ddd',
+            borderRadius: 8,
+            outline: 'none',
+          }}
         />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <button
+          type="submit"
+          disabled={loading || !input.trim()}
+          style={{
+            padding: '10px 20px',
+            fontSize: 15,
+            fontWeight: 500,
+            background: loading ? '#ccc' : '#111',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            cursor: loading ? 'default' : 'pointer',
+          }}
+        >
+          {loading ? '...' : 'Send'}
+        </button>
+      </form>
+
+      {response && (
+        <div
+          style={{
+            padding: 16,
+            background: '#f9f9f9',
+            borderRadius: 8,
+            fontSize: 15,
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {response}
+          {loading && <span style={{ opacity: 0.4 }}>▌</span>}
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }
