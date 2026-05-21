@@ -44,6 +44,12 @@ export async function POST(req: Request) {
         let currentText = '';
         let stopReason = '';
 
+        const completedToolCalls: Array<{
+          id: string;
+          name: string;
+          input: Record<string, string>;
+        }> = [];
+
         for await (const chunk of stream) {
           if (chunk.type === 'message_delta') {
             stopReason = chunk.delta.stop_reason ?? '';
@@ -51,9 +57,10 @@ export async function POST(req: Request) {
 
           if (chunk.type === 'content_block_start') {
             if (chunk.content_block.type === 'tool_use') {
-              // model is starting a tool call. capture the name and id
+              // reset tool state every time a new tool block starts
               currentToolName = chunk.content_block.name;
               currentToolId = chunk.content_block.id;
+              currentToolInput = '';
               send({ type: 'tool_start', name: currentToolName });
             }
           }
@@ -63,56 +70,51 @@ export async function POST(req: Request) {
               currentText += chunk.delta.text;
               send({ type: 'text', content: chunk.delta.text });
             }
-
             if (chunk.delta.type === 'input_json_delta') {
-              // accumulate the tool input JSON. it arrives in fragments
               currentToolInput += chunk.delta.partial_json;
             }
+          }
+
+          if (chunk.type === 'content_block_stop' && currentToolName) {
+            // this tool block is complete. parse and store it
+            completedToolCalls.push({
+              id: currentToolId,
+              name: currentToolName,
+              input: JSON.parse(currentToolInput),
+            });
+            // reset so we don't double-process if another block follows
+            currentToolName = '';
+            currentToolId = '';
+            currentToolInput = '';
           }
         }
 
         if (stopReason === 'tool_use') {
-          // parse the accumulated JSON input
-          console.log(currentToolInput);
-          const toolInput = JSON.parse(currentToolInput);
+          const assistantToolUseBlocks: Anthropic.Messages.ToolUseBlockParam[] =
+            completedToolCalls.map((call) => ({
+              type: 'tool_use',
+              id: call.id,
+              name: call.name,
+              input: call.input,
+            }));
 
-          // run the mock
-          const toolResult = executeTool(currentToolName, toolInput);
-          send({
-            type: 'tool_result',
-            name: currentToolName,
-            result: JSON.parse(toolResult),
-          });
-
-          // add the assistant's tool call and our result to the conversation
-          // this is what gets sent back to the model in the next loop iteration
-          messages.push({
-            role: 'assistant',
-            content: [
-              {
-                type: 'tool_use',
-                id: currentToolId,
-                name: currentToolName,
-                input: toolInput,
-              },
-            ],
-          });
-          messages.push({
-            role: 'user',
-            content: [
-              {
+          const toolResultBlocks: Anthropic.ToolResultBlockParam[] =
+            completedToolCalls.map((call) => {
+              const result = executeTool(call.name, call.input);
+              send({
                 type: 'tool_result',
-                tool_use_id: currentToolId,
-                content: toolResult,
-              },
-            ],
-          });
+                name: call.name,
+                result: JSON.parse(result),
+              });
+              return {
+                type: 'tool_result',
+                tool_use_id: call.id,
+                content: result,
+              };
+            });
 
-          // reset for next
-          currentToolName = '';
-          currentToolId = '';
-          currentToolInput = '';
-          currentText = '';
+          messages.push({ role: 'assistant', content: assistantToolUseBlocks });
+          messages.push({ role: 'user', content: toolResultBlocks });
         } else {
           // stop_reason is 'end_turn'. model is done, no more tool calls.
           break;
