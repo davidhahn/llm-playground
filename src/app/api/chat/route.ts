@@ -5,6 +5,7 @@ These are usually sent via SSE and is better for interactive / user-facing
 tasks (e.g. chatbot, Claude App, etc.). It also has the benefit of being
 able to cancel the generation early to save time and token.
 */
+import { executeTool, tools } from '@/lib/tools';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();
@@ -12,20 +13,109 @@ const client = new Anthropic();
 export async function POST(req: Request) {
   const { message } = await req.json();
 
-  const stream = client.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    messages: [{ role: 'user', content: message }],
-  });
+  const encoder = new TextEncoder();
 
   const readable = new ReadableStream({
     async start(controller) {
-      for await (const chunk of stream) {
-        if (
-          chunk.type === 'content_block_delta' &&
-          chunk.delta.type === 'text_delta'
-        ) {
-          controller.enqueue(chunk.delta.text);
+      const send = (data: object) => {
+        // serialize each event as JSON line so the frontend can parse it
+        controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'));
+      };
+
+      // build up the conversation as we go. start with just the user
+      // message.
+      const messages: Anthropic.MessageParam[] = [
+        { role: 'user', content: message },
+      ];
+
+      // loop so the tool use can be chained. it may call multiple tools
+      while (true) {
+        const stream = client.messages.stream({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          tools,
+          messages,
+        });
+
+        // collect the full response so we can add it to messages after streaming
+        let currentToolName = '';
+        let currentToolId = '';
+        let currentToolInput = '';
+        let currentText = '';
+        let stopReason = '';
+
+        for await (const chunk of stream) {
+          if (chunk.type === 'message_delta') {
+            stopReason = chunk.delta.stop_reason ?? '';
+          }
+
+          if (chunk.type === 'content_block_start') {
+            if (chunk.content_block.type === 'tool_use') {
+              // model is starting a tool call. capture the name and id
+              currentToolName = chunk.content_block.name;
+              currentToolId = chunk.content_block.id;
+              send({ type: 'tool_start', name: currentToolName });
+            }
+          }
+
+          if (chunk.type === 'content_block_delta') {
+            if (chunk.delta.type === 'text_delta') {
+              currentText += chunk.delta.text;
+              send({ type: 'text', content: chunk.delta.text });
+            }
+
+            if (chunk.delta.type === 'input_json_delta') {
+              // accumulate the tool input JSON. it arrives in fragments
+              currentToolInput += chunk.delta.partial_json;
+            }
+          }
+        }
+
+        if (stopReason === 'tool_use') {
+          // parse the accumulated JSON input
+          console.log(currentToolInput);
+          const toolInput = JSON.parse(currentToolInput);
+
+          // run the mock
+          const toolResult = executeTool(currentToolName, toolInput);
+          send({
+            type: 'tool_result',
+            name: currentToolName,
+            result: JSON.parse(toolResult),
+          });
+
+          // add the assistant's tool call and our result to the conversation
+          // this is what gets sent back to the model in the next loop iteration
+          messages.push({
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: currentToolId,
+                name: currentToolName,
+                input: toolInput,
+              },
+            ],
+          });
+          messages.push({
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: currentToolId,
+                content: toolResult,
+              },
+            ],
+          });
+
+          // reset for next
+          currentToolName = '';
+          currentToolId = '';
+          currentToolInput = '';
+          currentText = '';
+        } else {
+          // stop_reason is 'end_turn'. model is done, no more tool calls.
+          break;
         }
       }
 

@@ -2,15 +2,20 @@
 
 import { useState, useRef } from 'react';
 
+type Event =
+  | { type: 'text'; content: string }
+  | { type: 'tool_start'; name: string }
+  | { type: 'tool_result'; name: string; result: Record<string, string> };
+
 export default function Home() {
   const [input, setInput] = useState('');
-  const [response, setResponse] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   async function handleSubmit(event: React.SubmitEvent) {
     event.preventDefault();
-    if (!input.trim() || loading) {
+    if (!input.trim() || isLoading) {
       return;
     }
 
@@ -18,8 +23,8 @@ export default function Home() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
-    setResponse('');
-    setLoading(true);
+    setEvents([]);
+    setIsLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
@@ -39,21 +44,52 @@ export default function Home() {
       // Read the stream chunk by chunk
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
           break;
         }
-        // Append each decoded chunk to the response as it arrives
-        setResponse((prev) => prev + decoder.decode(value, { stream: true }));
+
+        // chunks may split across JSON lines, so buffer and split on newlines
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // last element may be incomplete. keep it in the buffer
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          const event: Event = JSON.parse(line);
+
+          if (event.type === 'text') {
+            // append text to the last text event if it exists, otherwise push new one
+            setEvents((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.type === 'text') {
+                return [
+                  ...prev.slice(0, -1),
+                  { type: 'text', content: last.content + event.content },
+                ];
+              }
+
+              return [...prev, event];
+            });
+          } else {
+            setEvents((prev) => [...prev, event]);
+          }
+        }
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        setResponse(`Error: ${err.message}`);
+        setEvents([{ type: 'text', content: `Error: ${err.message}` }]);
       }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }
 
@@ -67,7 +103,7 @@ export default function Home() {
       }}
     >
       <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>
-        01 — Streaming
+        02 — Tool Use
       </h1>
 
       <form
@@ -76,9 +112,9 @@ export default function Home() {
       >
         <input
           value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="Ask something..."
-          disabled={loading}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={`Try "What's the weather in Chicago?" or "What time is it in Tokyo?"`}
+          disabled={isLoading}
           style={{
             flex: 1,
             padding: '10px 14px',
@@ -90,37 +126,78 @@ export default function Home() {
         />
         <button
           type="submit"
-          disabled={loading || !input.trim()}
+          disabled={isLoading || !input.trim()}
           style={{
             padding: '10px 20px',
             fontSize: 15,
             fontWeight: 500,
-            background: loading ? '#ccc' : '#111',
+            background: isLoading ? '#ccc' : '#111',
             color: '#fff',
             border: 'none',
             borderRadius: 8,
-            cursor: loading ? 'default' : 'pointer',
+            cursor: isLoading ? 'default' : 'pointer',
           }}
         >
-          {loading ? '...' : 'Send'}
+          {isLoading ? '...' : 'Send'}
         </button>
       </form>
 
-      {response && (
-        <div
-          style={{
-            padding: 16,
-            background: '#f9f9f9',
-            borderRadius: 8,
-            fontSize: 15,
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {response}
-          {loading && <span style={{ opacity: 0.4 }}>▌</span>}
-        </div>
-      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {events.map((event, i) => {
+          if (event.type === 'tool_start') {
+            return (
+              <div
+                key={i}
+                style={{
+                  padding: '8px 14px',
+                  background: '#f0f4ff',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: '#4466cc',
+                  fontFamily: 'monospace',
+                }}
+              >
+                ⚙ calling {event.name}...
+              </div>
+            );
+          }
+          if (event.type === 'tool_result') {
+            return (
+              <div
+                key={i}
+                style={{
+                  padding: '8px 14px',
+                  background: '#f0fff4',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: '#336644',
+                  fontFamily: 'monospace',
+                }}
+              >
+                ✓ {event.name} → {JSON.stringify(event.result)}
+              </div>
+            );
+          }
+          return (
+            <div
+              key={i}
+              style={{
+                padding: 16,
+                background: '#f9f9f9',
+                borderRadius: 8,
+                fontSize: 15,
+                lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {event.content}
+              {isLoading && i === events.length - 1 && (
+                <span style={{ opacity: 0.4 }}>▌</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </main>
   );
 }
