@@ -1,13 +1,12 @@
 // import Anthropic from '@anthropic-ai/sdk';
 import * as dotenv from 'dotenv';
 import OpenAI from 'openai';
-import pool from '../lib/db';
+import getPool from '../lib/db';
 
 dotenv.config({ path: '.env.local' });
 
 // const anthropic = new Anthropic();
 const openai = new OpenAI();
-console.log('DATABASE_URL:', process.env.DATABASE_URL);
 const documents = [
   {
     content:
@@ -51,7 +50,7 @@ async function embedText(text: string): Promise<number[]> {
 
 async function seed() {
   console.log('Creating table...');
-  await pool.query(`
+  await getPool().query(`
     CREATE EXTENSION IF NOT EXISTS vector;
 
     CREATE TABLE IF NOT EXISTS documents (
@@ -68,21 +67,21 @@ async function seed() {
   `);
 
   // Clear existing rows so re-running the script stays idempotent
-  await pool.query('TRUNCATE documents RESTART IDENTITY');
+  await getPool().query('TRUNCATE documents RESTART IDENTITY');
   console.log('Table ready.');
 
   for (const doc of documents) {
     console.log(`Embedding: "${doc.content.slice(0, 60)}..."`);
     const embedding = await embedText(doc.content);
 
-    await pool.query(
+    await getPool().query(
       'INSERT INTO documents (content, embedding, metadata) VALUES ($1, $2, $3)',
       [doc.content, JSON.stringify(embedding), doc.metadata],
     );
   }
 
   console.log(`\nSeeded ${documents.length} documents.`);
-  await pool.end();
+  await getPool().end();
 }
 
 seed().catch((err) => {
