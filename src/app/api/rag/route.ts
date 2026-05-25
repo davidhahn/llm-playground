@@ -1,6 +1,7 @@
 import getPool from '@/lib/db';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import type { Pool } from 'pg';
 
 const anthropic = new Anthropic();
 const openai = new OpenAI();
@@ -13,25 +14,57 @@ async function embedQuery(text: string): Promise<number[]> {
   return response.data[0].embedding;
 }
 
-async function retrieveChunks(embedding: number[], topK = 3) {
-  const pool = getPool();
+async function retrieveChunks(
+  pool: Pool,
+  embedding: number[],
+  topK = 3,
+  minSimilarity = 0.15,
+) {
+  const vectorString = `[${embedding.join(',')}]`;
+
   const result = await pool.query(
-    `SELECT content, metadata, 1 - (embedding <=> $1::vector) AS similarity
+    `SELECT content, metadata, similarity
+   FROM (
+     SELECT content, metadata, 1 - (embedding <=> $1::vector) AS similarity
      FROM documents
-     ORDER BY embedding <=> $1::vector
-     LIMIT $2`,
-    [JSON.stringify(embedding), topK],
+   ) subq
+   ORDER BY similarity DESC
+   LIMIT ${topK}`,
+    [vectorString],
   );
-  return result.rows;
+
+  return result.rows.filter((r) => Number(r.similarity) > minSimilarity);
 }
 
 export async function POST(req: Request) {
   const { message } = await req.json();
+  const pool = getPool();
 
   // embed the query
   const queryEmbedding = await embedQuery(message);
-  // retrieve the most relevant chunks
-  const chunks = await retrieveChunks(queryEmbedding);
+  const chunks = await retrieveChunks(pool, queryEmbedding);
+
+  // exit early if nothing relevant is found
+  if (chunks.length === 0) {
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      start(controller) {
+        const send = (data: object) => {
+          controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'));
+        };
+        send({ type: 'sources', chunks: [] });
+        send({
+          type: 'text',
+          content:
+            "I couldn't find anything relevant in the knowledge base for that question.",
+        });
+        controller.close();
+      },
+    });
+    return new Response(readable, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
   // build the prompt with retrieved context
   const context = chunks
     .map(
@@ -66,7 +99,7 @@ ${context}`;
 
       // stream the generated response
       const stream = await anthropic.messages.stream({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }],
