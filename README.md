@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# llm-playground
+
+A progressive TypeScript sandbox for learning the Anthropic API from first principles. Each module builds on the last, covering the core patterns behind every production LLM feature — streaming, tool use, RAG, and structured output.
+
+Built as part of a deliberate skill-building pivot into applied AI engineering. Not a demo — a working reference for patterns I actually use.
+
+## Modules
+
+### `01-streaming`
+
+Streaming LLM responses to a Next.js UI via the Anthropic API.
+
+Covers the `ReadableStream` bridge between Anthropic's async iterator and the Web API standard expected by the browser. Explores the SSE event envelope (`message_start` → `content_block_delta` → `message_stop`) and the producer/consumer model that makes incremental rendering work.
+
+### `02-tool-use`
+
+Multi-turn tool-calling agent with streaming.
+
+The model decides mid-response to call a function, pauses generation, and resumes after receiving the result. Covers the full content block lifecycle (`content_block_start` for block type detection, `input_json_delta` for streaming JSON arguments, `content_block_stop` for safe parsing), conversation state management across turns, and NDJSON as the event protocol for mixed content types on the frontend.
+
+### `03-rag-basic`
+
+Retrieval-Augmented Generation with pgvector and OpenAI embeddings.
+
+Covers the full RAG pipeline: chunking documents, generating embeddings, storing vectors in pgvector on PostgreSQL, and retrieving semantically relevant context at query time. Includes a debugging write-up on a pgvector behavior where referencing the same parameterized vector expression more than once in a single query silently returns empty results — and the subquery pattern that fixes it.
+
+### `04-structured-output`
+
+Forcing structured JSON output via two approaches: prompt-based and forced tool use with `tool_choice`.
+
+Covers when each approach is appropriate, how property descriptions drive output quality when using forced tool use, and why the model's tool selection is opaque (and what that means for debugging and evals).
+
+### `05-conversation-memory`
+
+Multi-turn chat with persistent conversation history across page reloads.
+
+The Anthropic API is stateless — every call is independent with no memory of prior turns. This module covers the pattern for solving that: the client owns and maintains the message history array, sends the full conversation context with every request, and receives the updated history back as a separate streaming event at the end of each response. Also covers context window and cost tradeoffs that make unbounded history growth impractical, the "last N turns" trimming strategy, and the two-stage storage design — in-memory for the active session, `sessionStorage` for persistence across page reloads.
+
+## Stack
+
+- **Next.js** (App Router) — frontend and API routes
+- **TypeScript** — end to end
+- **Anthropic SDK** — Claude claude-sonnet-4-20250514
+- **OpenAI SDK** — embeddings (used in `03-rag-basic`)
+- **pgvector on PostgreSQL** — vector store (via Docker)
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+
+- Docker (for pgvector in module 03)
+- Anthropic API key
+- OpenAI API key (module 03 only)
+
+### Setup
+
+```bash
+git clone https://github.com/davidhahn/llm-playground.git
+cd llm-playground
+npm install
+```
+
+Create a `.env.local` file:
+
+```
+ANTHROPIC_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here
+```
+
+For module 03, start the pgvector database:
+
+```bash
+docker-compose up -d
+```
+
+Run the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open [http://localhost:3000](http://localhost:3000).
