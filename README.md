@@ -36,6 +36,11 @@ Multi-turn chat with persistent conversation history across page reloads.
 
 The Anthropic API is stateless — every call is independent with no memory of prior turns. This module covers the pattern for solving that: the client owns and maintains the message history array, sends the full conversation context with every request, and receives the updated history back as a separate streaming event at the end of each response. Also covers context window and cost tradeoffs that make unbounded history growth impractical, the "last N turns" trimming strategy, and the two-stage storage design — in-memory for the active session, `sessionStorage` for persistence across page reloads.
 
+### `06-tool-use-rag`
+
+An HR agent that combines tool use and RAG — where retrieval becomes a decision, not a default.
+Instead of retrieval running unconditionally on every query, the model decides at runtime which tools to invoke: a vector search over a policy handbook, a live employee data lookup, a PTO balance check, or none at all. Covers parallel vs. sequential tool call patterns (and why the routing layer must be a loop, not a branch), why system prompt ordering is as important as tool descriptions for reliable agent behavior, and how the model synthesizes results across multiple data sources into answers richer than any single tool could return. The architecture mirrors real enterprise FDE deployments — swapping the mocked tools for real HR and payroll APIs is a one-line change.
+
 ## Stack
 
 - **Next.js** (App Router) — frontend and API routes
