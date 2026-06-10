@@ -1,7 +1,10 @@
 import getPool from '@/lib/db';
 import Anthropic from '@anthropic-ai/sdk';
+import * as dotenv from 'dotenv';
 import OpenAI from 'openai';
 import type { Pool } from 'pg';
+
+dotenv.config({ path: '.env.local' });
 
 const anthropic = new Anthropic();
 const openai = new OpenAI();

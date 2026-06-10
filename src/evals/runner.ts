@@ -10,8 +10,6 @@ dotenv.config({ path: '.env.local' });
 const anthropic = new Anthropic();
 const openai = new OpenAI();
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 type EvalScore = {
   accuracy: { score: number; reasoning: string };
   citation_quality: { score: number; reasoning: string };
