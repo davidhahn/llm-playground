@@ -41,6 +41,14 @@ The Anthropic API is stateless — every call is independent with no memory of p
 An HR agent that combines tool use and RAG — where retrieval becomes a decision, not a default.
 Instead of retrieval running unconditionally on every query, the model decides at runtime which tools to invoke: a vector search over a policy handbook, a live employee data lookup, a PTO balance check, or none at all. Covers parallel vs. sequential tool call patterns (and why the routing layer must be a loop, not a branch), why system prompt ordering is as important as tool descriptions for reliable agent behavior, and how the model synthesizes results across multiple data sources into answers richer than any single tool could return. The architecture mirrors real enterprise FDE deployments — swapping the mocked tools for real HR and payroll APIs is a one-line change.
 
+### `07-evals`
+
+Automated evaluation framework comparing 03-rag-basic and 06-tool-use-rag across 10 test cases each, scored on accuracy, citation quality, and confidence using LLM-as-judge with forced tool use.
+
+The core lesson came from a false negative: the agent scored 1.5–4/10 on employee lookup questions despite returning correct answers. The scorer was applying document-citation criteria to live tool data responses — a bad eval criterion, not a broken system. The fix was a case_type field on each test case that switches the citation rubric based on whether the response comes from retrieval or a live API. After the fix, both systems hit 100% pass rate; the remaining delta (-0.8) is entirely in citation quality and is fixable with a targeted system prompt change.
+
+Final numbers: RAG scores 9.1/10 at 8.6s average latency; the agent scores 8.3/10 at 12.3s with higher accuracy (9.8 vs 9.3) due to live data access. The latency cost of additional tool calls is real and has to be accounted for in production system design.
+
 ## Stack
 
 - **Next.js** (App Router) — frontend and API routes
