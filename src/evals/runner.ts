@@ -77,7 +77,10 @@ async function runRagQuery(
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 512,
-    system: `Answer using only the context below. If the answer isn't in the context, say so.\n\nContext:\n${context}`,
+    system: `Answer using only the context below. Always cite sources inline using [1], [2] etc. after each claim. If the answer isn't in the context, say so.
+
+Context:
+${context}`,
     messages: [{ role: 'user', content: question }],
   });
 
@@ -161,7 +164,7 @@ async function runAgentQuery(
         .filter((block) => block.type === 'text')
         .map((block) => (block.type === 'text' ? block.text : ''))
         .join('');
-      return { answer, sources, tool_called };
+      return { answer, sources: sources ?? [], tool_called };
     }
   }
 }
@@ -171,7 +174,7 @@ async function runAgentQuery(
 async function scoreResponse(
   question: string,
   answer: string,
-  sources: string[],
+  sources: string[] = [],
   expectedTopics: string[],
   caseType: 'retrieval' | 'live_data',
 ): Promise<EvalScore> {
