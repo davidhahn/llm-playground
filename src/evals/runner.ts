@@ -173,10 +173,18 @@ async function scoreResponse(
   answer: string,
   sources: string[],
   expectedTopics: string[],
+  caseType: 'retrieval' | 'live_data',
 ): Promise<EvalScore> {
+  const citationCriteria =
+    caseType === 'live_data'
+      ? 'citation_quality: Does the answer accurately reflect the data returned by the tool? For live data responses, explicit document citations are not expected — score based on whether the answer correctly uses the structured data provided.'
+      : 'citation_quality: Does the answer explicitly cite sources inline (e.g. [1], [2])? Penalize answers that make claims without referencing which source they came from.';
+
   const sourcesText =
     sources.length > 0
       ? sources.map((source, index) => `[${index + 1}] ${source}`).join('\n')
+      : caseType === 'live_data'
+      ? 'Live data returned from tool call — no document sources.'
       : 'No sources retrieved.';
 
   const response = await anthropic.messages.create({
@@ -195,7 +203,7 @@ async function scoreResponse(
                 score: {
                   type: 'number',
                   description:
-                    '0-10: does the answer correctly reflect the sources?',
+                    '0-10: does the answer correctly reflect the sources or tool data?',
                 },
                 reasoning: { type: 'string' },
               },
@@ -206,7 +214,10 @@ async function scoreResponse(
               properties: {
                 score: {
                   type: 'number',
-                  description: '0-10: does the answer cite sources explicitly?',
+                  description:
+                    caseType === 'live_data'
+                      ? '0-10: does the answer correctly use the structured data from the tool? Citations not required for live data.'
+                      : '0-10: does the answer cite document sources explicitly?',
                 },
                 reasoning: { type: 'string' },
               },
@@ -248,18 +259,33 @@ async function scoreResponse(
     messages: [
       {
         role: 'user',
-        content: `Evaluate this RAG response.
+        content: `Evaluate this ${
+          caseType === 'live_data' ? 'live data' : 'RAG'
+        } response.
+
+${
+  caseType === 'live_data'
+    ? 'Note: this response is based on structured data from a tool call, not document retrieval. Do not penalize for missing document citations.'
+    : ''
+}
 
 Question: ${question}
 Expected topics to cover: ${
           expectedTopics.length > 0
             ? expectedTopics.join(', ')
-            : "N/A — this is an out-of-domain question, correct behavior is to say the answer isn't available"
+            : "N/A — out-of-domain, correct behavior is to say the answer isn't available"
         }
+
+Scoring criteria:
+- accuracy: Does the answer correctly reflect the sources or tool data? Penalize hallucinations.
+- ${citationCriteria}
+- confidence: Is the confidence level appropriate given the available sources or data?
+- verdict: pass if overall_score >= 7, fail otherwise
+- flags: include any of: hallucination_detected, missing_citation, overconfident, insufficient_sources, off_topic, correct_refusal
 
 Answer: ${answer}
 
-Sources:
+Sources / Tool data:
 ${sourcesText}`,
       },
     ],
@@ -299,6 +325,7 @@ async function runEvals(
         answer,
         sources,
         evalCase.expected_topics,
+        evalCase.case_type,
       );
       const latency_ms = Date.now() - start;
 
