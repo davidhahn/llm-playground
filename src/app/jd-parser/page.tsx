@@ -2,6 +2,9 @@
 
 import { useState, useRef } from 'react';
 import type { ParsedJD } from '../api/jd-parser/route';
+import { extractCompletedFields } from '../utils/jd-parser-helpers';
+import Field from '@/app/components/jd-parser/Field';
+import ArrayField from '@/app/components/jd-parser/ArrayField';
 
 const SAMPLE_JD = `Forward Deployed Engineer
 Anthropic | San Francisco, CA (Hybrid) | $180,000 - $280,000
@@ -26,33 +29,6 @@ Nice to Haves
 Tech Stack
 Python, TypeScript, Next.js, Postgres, pgvector, Anthropic SDK, LangChain`;
 
-// attempt to extract completed string fields from partial JSON
-function extractCompletedFields(json: string): Partial<ParsedJD> {
-  const result: Partial<ParsedJD> = {};
-
-  // match completed string fields: "key": "value"
-  const stringPattern = /"(\w+)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*[,}]/g;
-  let match;
-  while ((match = stringPattern.exec(json)) !== null) {
-    const [, key, value] = match;
-    (result as Record<string, string>)[key] = value;
-  }
-
-  // match completed array fields: "key": ["item1", "item2"]
-  const arrayPattern = /"(\w+)"\s*:\s*\[([^\]]*)\]/g;
-  while ((match = arrayPattern.exec(json)) !== null) {
-    const [, key, items] = match;
-    const parsed =
-      items.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)?.map((s) => s.slice(1, -1)) ??
-      [];
-    if (parsed.length > 0) {
-      (result as Record<string, string[]>)[key] = parsed;
-    }
-  }
-
-  return result;
-}
-
 const SENIORITY_COLORS: Record<string, string> = {
   junior: '#4CAF50',
   mid: '#2196F3',
@@ -65,13 +41,13 @@ export default function JDParserPage() {
   const [jdText, setJdText] = useState(SAMPLE_JD);
   const [partialData, setPartialData] = useState<Partial<ParsedJD>>({});
   const [completeData, setCompleteData] = useState<ParsedJD | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [rawJson, setRawJson] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
   async function handleSubmit(event: React.SubmitEvent) {
     event.preventDefault();
-    if (!jdText.trim() || loading) {
+    if (!jdText.trim() || isLoading) {
       return;
     }
 
@@ -81,7 +57,7 @@ export default function JDParserPage() {
     setPartialData({});
     setCompleteData(null);
     setRawJson('');
-    setLoading(true);
+    setIsLoading(true);
 
     try {
       const res = await fetch('/api/jd-parser', {
@@ -133,7 +109,7 @@ export default function JDParserPage() {
         console.error(error);
       }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }
 
@@ -174,20 +150,20 @@ export default function JDParserPage() {
         />
         <button
           type="submit"
-          disabled={loading || !jdText.trim()}
+          disabled={isLoading || !jdText.trim()}
           style={{
             marginTop: 8,
             padding: '10px 24px',
             fontSize: 14,
             fontWeight: 500,
-            background: loading ? '#ccc' : '#111',
+            background: isLoading ? '#ccc' : '#111',
             color: '#fff',
             border: 'none',
             borderRadius: 8,
-            cursor: loading ? 'default' : 'pointer',
+            cursor: isLoading ? 'default' : 'pointer',
           }}
         >
-          {loading ? 'Parsing...' : 'Parse JD'}
+          {isLoading ? 'Parsing...' : 'Parse JD'}
         </button>
       </form>
 
@@ -296,97 +272,5 @@ export default function JDParserPage() {
         </div>
       )}
     </main>
-  );
-}
-
-function Field({
-  label,
-  value,
-  complete,
-  multiline,
-}: {
-  label: string;
-  value?: string;
-  complete: boolean;
-  multiline?: boolean;
-}) {
-  return (
-    <div style={{ padding: 16, background: '#f9f9f9', borderRadius: 8 }}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: '#888',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-        {!complete && value && (
-          <span style={{ color: '#ccc', marginLeft: 6, fontWeight: 400 }}>
-            streaming...
-          </span>
-        )}
-      </div>
-      <div
-        style={{
-          fontSize: 14,
-          color: value ? '#111' : '#ccc',
-          lineHeight: multiline ? 1.6 : 'normal',
-        }}
-      >
-        {value ?? '—'}
-      </div>
-    </div>
-  );
-}
-
-function ArrayField({
-  label,
-  items,
-  complete,
-}: {
-  label: string;
-  items: string[];
-  complete: boolean;
-}) {
-  return (
-    <div style={{ padding: 16, background: '#f9f9f9', borderRadius: 8 }}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: '#888',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: 10,
-        }}
-      >
-        {label} ({items.length})
-        {!complete && (
-          <span style={{ color: '#ccc', marginLeft: 6, fontWeight: 400 }}>
-            streaming...
-          </span>
-        )}
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {items.map((item, i) => (
-          <span
-            key={i}
-            style={{
-              padding: '4px 10px',
-              background: 'white',
-              border: '1px solid #ddd',
-              borderRadius: 20,
-              fontSize: 12,
-              color: '#333',
-            }}
-          >
-            {item}
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }
