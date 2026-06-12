@@ -49,6 +49,14 @@ The core lesson came from a false negative: the agent scored 1.5–4/10 on emplo
 
 Final numbers: RAG scores 9.1/10 at 8.6s average latency; the agent scores 8.3/10 at 12.3s with higher accuracy (9.8 vs 9.3) due to live data access. The latency cost of additional tool calls is real and has to be accounted for in production system design.
 
+### `08-streaming-structured-output`
+
+Progressive JSON field rendering as the model streams a structured object, before the complete response arrives.
+
+04-structured-output waited for content_block_stop before parsing — correct and simple, but leaves a blank UI until the full object is ready. This module adds incremental extraction using regex over the accumulated input_json_delta string: completed fields render as they arrive, and a guaranteed-valid full parse at content_block_stop replaces the partial state. The frontend switches between partialData and completeData via a single null-coalescing swap.
+
+The honest engineering question this module answers is when the added complexity is justified: the incremental approach earns its cost only when the object has fields useful before the whole thing is done, generation is slow enough to notice, and partial state makes sense to display. For backend pipelines, eval scorers, or short objects, buffering until content_block_stop is simpler and equally correct.
+
 ## Stack
 
 - **Next.js** (App Router) — frontend and API routes
