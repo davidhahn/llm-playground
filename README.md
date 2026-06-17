@@ -57,6 +57,14 @@ Progressive JSON field rendering as the model streams a structured object, befor
 
 The honest engineering question this module answers is when the added complexity is justified: the incremental approach earns its cost only when the object has fields useful before the whole thing is done, generation is slow enough to notice, and partial state makes sense to display. For backend pipelines, eval scorers, or short objects, buffering until content_block_stop is simpler and equally correct.
 
+### `09-error-handling`
+
+Production-grade error handling across all three categories of LLM system failures: transient errors (rate limits, timeouts, 5xx), permanent errors (auth, malformed requests), and output errors (truncated responses, malformed JSON, tool failures).
+
+The retry utility separates two concerns that most implementations conflate: error type determines whether to retry at all; attempt count limits how many times. Exponential backoff includes jitter to prevent thundering herd — synchronized retries from parallel clients that spike the server again in lockstep. Permanent errors (401, 403) are detected and thrown immediately without retrying.
+
+Output errors get distinct treatment: stop_reason === "max_tokens" triggers a retry with higher token budget rather than silently returning a truncated response; malformed prompt-based JSON gets an extraction attempt before failing; tool execution failures are passed back to the model via tool_result so it can reason over the error and explain it to the user — rather than the application silently swallowing the failure.
+
 ## Stack
 
 - **Next.js** (App Router) — frontend and API routes
