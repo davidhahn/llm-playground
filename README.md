@@ -65,6 +65,14 @@ The retry utility separates two concerns that most implementations conflate: err
 
 Output errors get distinct treatment: stop_reason === "max_tokens" triggers a retry with higher token budget rather than silently returning a truncated response; malformed prompt-based JSON gets an extraction attempt before failing; tool execution failures are passed back to the model via tool_result so it can reason over the error and explain it to the user — rather than the application silently swallowing the failure.
 
+### `10-cost-latency-tracking`
+
+Token usage, cost, and latency instrumentation layered transparently over the existing streaming infrastructure — no calling code changes required.
+
+message_start and message_delta already carry input/output token counts on every stream; this module reads them via a generator wrapper that intercepts and re-yields each chunk unchanged. Cost calculation respects the asymmetric pricing between input and output tokens (output costs ~5x more on Sonnet), which inverts the naive assumption that verbose prompts are the expensive part. Three logged query types surfaced concrete findings: a forced-tool-use call spent 722 input tokens on schema alone before the prompt even started, a max_tokens truncation produced the single most expensive call in the set despite the user never receiving a complete answer, and total token count diverged meaningfully from dollar cost once the input/output split was accounted for.
+
+Pairs directly with `07-evals` — evals answer whether the agent's output is good enough; this module answers whether it's good enough to justify what it costs.
+
 ## Stack
 
 - **Next.js** (App Router) — frontend and API routes
